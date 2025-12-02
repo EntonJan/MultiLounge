@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Enton's MTG Suite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { background-color: #111827; color: white; font-family: sans-serif; }
+        .glass { background: rgba(31, 41, 55, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .input-dark { @apply bg-gray-900 border border-gray-700 text-white p-3 rounded w-full focus:outline-none focus:border-yellow-500; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6 bg-[url('https://images.unsplash.com/photo-1627916616086-4e5a953a5570?q=80&w=2000&auto=format&fit=crop')] bg-cover bg-center bg-no-repeat">
+    <div class="absolute inset-0 bg-gray-900/80"></div>
+
+    <div id="app" class="relative z-10 w-full max-w-md">
+        <div class="glass p-8 rounded-xl shadow-2xl">
+            <h1 class="text-3xl font-bold text-yellow-400 mb-2 text-center">MTG Suite Access</h1>
+            <p id="auth-info" class="text-gray-400 text-center mb-6">Please log in to continue.</p>
+
+            <form id="auth-form" onsubmit="event.preventDefault();" class="space-y-4">
+                <input type="email" id="email" placeholder="Email" class="input-dark" required autocomplete="email">
+                <input type="password" id="password" placeholder="Password (min 6 characters)" class="input-dark" required autocomplete="current-password">
+                
+                <div id="error-message" class="text-red-400 text-sm text-center bg-red-900/30 p-2 rounded hidden border border-red-500/50"></div>
+
+                <div class="flex space-x-4 pt-4">
+                    <button type="button" id="login-btn" class="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-lg transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i data-lucide="log-in" class="w-5 h-5 inline-block align-text-bottom mr-2"></i> Log In
+                    </button>
+                    <button type="button" id="signup-btn" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i data-lucide="user-plus" class="w-5 h-5 inline-block align-text-bottom mr-2"></i> Sign Up
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        
+        const firebaseConfig = {
+            apiKey: "AIzaSyB2qmkKq4sYOXDd7mF-Mq1rnCWCfDAWXew",
+            authDomain: "entons-game-tracker.firebaseapp.com",
+            projectId: "entons-game-tracker",
+            storageBucket: "entons-game-tracker.firebasestorage.app",
+            messagingSenderId: "968932411080",
+            appId: "1:968932411080:web:d391ffe5ecbd7852bc47fd",
+            measurementId: "G-KB6JSFEPS1"
+        };
+        
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+
+        // Elements
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const loginBtn = document.getElementById('login-btn');
+        const signupBtn = document.getElementById('signup-btn');
+        const errorDiv = document.getElementById('error-message');
+        const authInfo = document.getElementById('auth-info');
+
+        const displayError = (message) => {
+            console.error(message);
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+        };
+
+        const hideError = () => {
+            errorDiv.classList.add('hidden');
+            errorDiv.textContent = '';
+        };
+        
+        const setButtonsLoading = (isLoading) => {
+            loginBtn.disabled = isLoading;
+            signupBtn.disabled = isLoading;
+            if (isLoading) {
+                loginBtn.innerHTML = 'Loading...';
+                signupBtn.innerHTML = 'Loading...';
+            } else {
+                loginBtn.innerHTML = '<i data-lucide="log-in" class="w-5 h-5 inline-block align-text-bottom mr-2"></i> Log In';
+                signupBtn.innerHTML = '<i data-lucide="user-plus" class="w-5 h-5 inline-block align-text-bottom mr-2"></i> Sign Up';
+                lucide.createIcons();
+            }
+        };
+
+        const handleAuth = async (isSignUp) => {
+            console.log("Auth Attempt:", isSignUp ? "Sign Up" : "Login");
+            hideError();
+            
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!email || password.length < 6) {
+                displayError("Bitte gib eine gültige Email und ein Passwort mit mind. 6 Zeichen ein.");
+                return;
+            }
+
+            setButtonsLoading(true);
+
+            try {
+                if (isSignUp) {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                } else {
+                    await signInWithEmailAndPassword(auth, email, password);
+                }
+                console.log("Auth successful");
+                // Redirect happens in onAuthStateChanged
+            } catch (error) {
+                console.error("Auth Error:", error);
+                let msg = error.message;
+                if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                    msg = "Email oder Passwort falsch.";
+                } else if (error.code === 'auth/email-already-in-use') {
+                    msg = "Diese Email wird bereits verwendet.";
+                } else if (error.code) {
+                    msg = error.code.replace('auth/', '').replace(/-/g, ' ');
+                }
+                displayError("Fehler: " + msg);
+                setButtonsLoading(false);
+            }
+        };
+
+        // Attach Listeners
+        loginBtn.addEventListener('click', (e) => { e.preventDefault(); handleAuth(false); });
+        signupBtn.addEventListener('click', (e) => { e.preventDefault(); handleAuth(true); });
+
+        // Auth State Listener
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                console.log("User detected, redirecting...");
+                window.location.href = 'homescreen.html';
+            } else {
+                lucide.createIcons();
+            }
+        });
+    </script>
+</body>
+</html>

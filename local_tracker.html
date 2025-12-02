@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MTG Local Game Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --color-w: #F9F3B7; --color-u: #3A62B7; --color-b: #1E1E1E; --color-r: #D64242; --color-g: #5B9567; }
+        body { font-family: 'Inter', sans-serif; background-color: #1a1a1a; color: #e5e5e5; }
+        .mana-symbol { width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; border-width: 2px; font-weight: bold; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .mana-w { background-color: var(--color-w); color: #333; border-color: #e6e0a8; }
+        .mana-u { background-color: var(--color-u); color: white; border-color: #2a52a7; }
+        .mana-b { background-color: var(--color-b); color: white; border-color: #000; }
+        .mana-r { background-color: var(--color-r); color: white; border-color: #c63232; }
+        .mana-g { background-color: var(--color-g); color: white; border-color: #4b8557; }
+        .mana-selected { transform: scale(1.1); box-shadow: 0 0 10px var(--color-r); border-width: 4px; }
+        .mana-w.mana-selected { box-shadow: 0 0 10px var(--color-w); }
+        .mana-u.mana-selected { box-shadow: 0 0 10px var(--color-u); }
+        .mana-b.mana-selected { box-shadow: 0 0 10px var(--color-b); }
+        .mana-g.mana-selected { box-shadow: 0 0 10px var(--color-g); }
+        .match-card { @apply bg-gray-800 p-4 rounded-xl shadow-lg border-l-4 border-gray-700 mb-3; }
+        .match-card.win { border-color: var(--color-g); }
+        .match-card.loss { border-color: var(--color-r); }
+        .input-dark { @apply bg-gray-700 border border-gray-600 p-2 rounded w-full text-white; }
+        .select-dark { @apply bg-gray-700 border border-gray-600 p-2 rounded text-white; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #eab308; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-900">
+
+    <div id="app-root">
+        <div class="min-h-screen flex flex-col items-center justify-center">
+            <div class="loader mb-4"></div>
+            <p class="text-gray-400">Checking authentication...</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, onSnapshot, orderBy } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyB2qmkKq4sYOXDd7mF-Mq1rnCWCfDAWXew",
+            authDomain: "entons-game-tracker.firebaseapp.com",
+            projectId: "entons-game-tracker",
+            storageBucket: "entons-game-tracker.firebasestorage.app",
+            messagingSenderId: "968932411080",
+            appId: "1:968932411080:web:d391ffe5ecbd7852bc47fd",
+            measurementId: "G-KB6JSFEPS1"
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const root = document.getElementById('app-root');
+        
+        /* --- GLOBAL HEADER START (DO NOT CHANGE) --- */
+        const renderHeader = (user) => {
+            const displayName = user.displayName || user.email.split('@')[0];
+            const hexId = user.uid.substring(0, 9).toUpperCase();
+            
+            return `
+                <header class="bg-gray-800 shadow-md p-4 sticky top-0 z-50 border-b border-gray-700">
+                    <div class="max-w-7xl mx-auto flex justify-between items-center">
+                        <div class="flex items-center space-x-4">
+                            <h1 class="text-2xl font-bold text-yellow-400 tracking-tight">Local Tracker</h1>
+                            <button id="home-btn" class="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded-full transition-colors shadow-sm" title="Home Menu">
+                                <i data-lucide="home" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                        <div class="text-right text-sm">
+                            <div class="flex items-center justify-end space-x-2">
+                                <span class="font-semibold text-white cursor-pointer hover:text-yellow-300 transition-colors" id="name-display" title="Click to Change Name">${displayName}</span> 
+                                <span class="text-gray-500">| ${hexId}</span>
+                            </div>
+                            <div class="flex items-center justify-end space-x-2 mt-1">
+                                <span class="text-xs text-gray-500">${user.email}</span>
+                                <button id="logout-btn" class="text-red-400 hover:text-red-300 text-xs transition-colors flex items-center">
+                                    <i data-lucide="log-out" class="w-3 h-3 mr-1"></i> Logout
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+            `;
+        };
+        /* --- GLOBAL HEADER END --- */
+
+        const MATCHES_COLLECTION = 'local_matches';
+        let currentUser = null;
+        let selectedColors = { own: [], opponent: [] };
+        let matchData = [];
+        let filters = { ownDeck: 'all', opponentDeck: 'all', result: 'all' };
+
+        function renderColorSymbols(colors) {
+            return colors.map(c => `<span class="mana-symbol mana-${c.toLowerCase()} w-5 h-5 text-xs">${c}</span>`).join('');
+        }
+
+        function renderMatchCard(match) {
+            const winClass = match.result === 'Win' ? 'win' : 'loss';
+            const date = new Date(match.timestamp).toLocaleDateString('de-DE', { year: 'numeric', month: '2-digit', day: '2-digit' });
+            return `
+                <div class="match-card ${winClass}">
+                    <div class="flex justify-between items-start">
+                        <h3 class="font-bold text-white text-lg">${match.ownDeckName} <span class="text-gray-400 font-normal">vs.</span> ${match.opponentDeckName}</h3>
+                        <span class="text-sm font-semibold">${date}</span>
+                    </div>
+                    <div class="mt-2 flex justify-between text-sm">
+                        <div class="flex items-center space-x-2"><span class="text-gray-300">Dein Deck:</span> ${renderColorSymbols(match.ownDeckColors || [])}</div>
+                        <div class="flex items-center space-x-2"><span class="text-gray-300">Gegner Deck:</span> ${renderColorSymbols(match.opponentDeckColors || [])}</div>
+                    </div>
+                    <div class="mt-2 text-md font-bold ${winClass === 'win' ? 'text-green-400' : 'text-red-400'}">${match.result} (${match.gamesWon}:${match.gamesLost})</div>
+                </div>
+            `;
+        }
+        
+        function renderMatchList() {
+            const listDiv = document.getElementById('match-list');
+            if (!listDiv) return;
+            const filteredMatches = matchData.filter(match => {
+                const deckMatch = filters.ownDeck === 'all' || match.ownDeckName === filters.ownDeck;
+                const opponentMatch = filters.opponentDeck === 'all' || match.opponentDeckName === filters.opponentDeck;
+                const resultMatch = filters.result === 'all' || match.result === filters.result;
+                return deckMatch && opponentMatch && resultMatch;
+            });
+            if (filteredMatches.length === 0) listDiv.innerHTML = `<p class="text-center text-gray-500 pt-4">${matchData.length === 0 ? 'Keine Spiele protokolliert.' : 'Keine Spiele für diese Filter gefunden.'}</p>`;
+            else listDiv.innerHTML = filteredMatches.map(renderMatchCard).join('');
+            document.getElementById('loading-text')?.classList.add('hidden');
+        }
+
+        function logMatch(e) {
+            e.preventDefault();
+            const btn = document.getElementById('log-match-btn');
+            btn.textContent = 'Speichere...';
+            btn.disabled = true;
+            const data = {
+                ownDeckName: document.getElementById('ownDeckName').value.trim(),
+                opponentDeckName: document.getElementById('opponentDeckName').value.trim(),
+                gamesWon: parseInt(document.getElementById('gamesWon').value),
+                gamesLost: parseInt(document.getElementById('gamesLost').value),
+                ownDeckColors: selectedColors.own,
+                opponentDeckColors: selectedColors.opponent,
+                result: parseInt(document.getElementById('gamesWon').value) > parseInt(document.getElementById('gamesLost').value) ? 'Win' : 'Loss',
+                format: document.getElementById('format').value,
+                timestamp: Date.now(),
+                user: currentUser.uid
+            };
+            try {
+                addDoc(collection(db, 'users', currentUser.uid, MATCHES_COLLECTION), data);
+                document.getElementById('ownDeckName').value = '';
+                document.getElementById('opponentDeckName').value = '';
+                document.getElementById('gamesWon').value = 0;
+                document.getElementById('gamesLost').value = 0;
+                selectedColors = { own: [], opponent: [] };
+                document.querySelectorAll('.mana-symbol').forEach(el => el.classList.remove('mana-selected'));
+                checkForm();
+            } catch(err) { console.error(err); alert("Fehler beim Speichern: " + err.message); } finally { btn.textContent = 'Spiel protokollieren'; }
+        }
+
+        function toggleColor(el, type) {
+            const color = el.getAttribute('data-color');
+            const isSelected = el.classList.contains('mana-selected');
+            if (isSelected) {
+                el.classList.remove('mana-selected');
+                selectedColors[type] = selectedColors[type].filter(c => c !== color);
+            } else {
+                el.classList.add('mana-selected');
+                selectedColors[type].push(color);
+            }
+            checkForm();
+        }
+
+        function checkForm() {
+            const btn = document.getElementById('log-match-btn');
+            if (!btn) return;
+            const ownName = document.getElementById('ownDeckName').value.trim();
+            const oppName = document.getElementById('opponentDeckName').value.trim();
+            const won = parseInt(document.getElementById('gamesWon').value);
+            const lost = parseInt(document.getElementById('gamesLost').value);
+            const isValid = ownName.length > 0 && oppName.length > 0 && selectedColors.own.length > 0 && selectedColors.opponent.length > 0 && (won + lost > 0);
+            btn.disabled = !isValid;
+        }
+
+        function loadFilters() {
+            const ownDecks = [...new Set(matchData.map(m => m.ownDeckName))];
+            const opponentDecks = [...new Set(matchData.map(m => m.opponentDeckName))];
+            const createOptions = (selectId, decks) => {
+                const select = document.getElementById(selectId);
+                if (!select) return;
+                select.innerHTML = '<option value="all">Alle Decks</option>';
+                decks.forEach(deck => { select.innerHTML += `<option value="${deck}">${deck}</option>`; });
+                select.onchange = (e) => { filters[selectId === 'filterOwnDeck' ? 'ownDeck' : 'opponentDeck'] = e.target.value; renderMatchList(); };
+            };
+            createOptions('filterOwnDeck', ownDecks);
+            createOptions('filterOpponentDeck', opponentDecks);
+            document.getElementById('filterResult').onchange = (e) => { filters.result = e.target.value; renderMatchList(); };
+        }
+
+        function listenForMatches() {
+            if (!currentUser) return;
+            const q = query(collection(db, 'users', currentUser.uid, MATCHES_COLLECTION), orderBy('timestamp', 'desc'));
+            onSnapshot(q, (snapshot) => {
+                matchData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                loadFilters();
+                renderMatchList();
+            }, (error) => { console.error("Error fetching data:", error); document.getElementById('match-list').innerHTML = '<p class="text-center text-red-500">Fehler beim Laden der Daten.</p>'; });
+        }
+        
+        function renderApp(user) {
+            currentUser = user;
+            root.innerHTML = `
+                ${renderHeader(user)}
+                <div class="max-w-4xl mx-auto p-6">
+                    <h2 class="text-3xl font-bold text-white mb-6">Neues Lokales Spiel protokollieren</h2>
+                    <div class="bg-gray-800 p-6 rounded-xl shadow-lg mb-8 border border-gray-700">
+                        <form id="matchForm" class="space-y-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Eigenes Deck (Name)</label>
+                                    <input type="text" id="ownDeckName" class="input-dark" required placeholder="Mein Deck" />
+                                    <div id="own-colors-container" class="mt-2 flex space-x-2">
+                                        <div class="mana-symbol mana-w" data-color="W">W</div>
+                                        <div class="mana-symbol mana-u" data-color="U">U</div>
+                                        <div class="mana-symbol mana-b" data-color="B">B</div>
+                                        <div class="mana-symbol mana-r" data-color="R">R</div>
+                                        <div class="mana-symbol mana-g" data-color="G">G</div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Gegner Deck (Name)</label>
+                                    <input type="text" id="opponentDeckName" class="input-dark" required placeholder="Gegner Deck" />
+                                    <div id="opponent-colors-container" class="mt-2 flex space-x-2">
+                                        <div class="mana-symbol mana-w" data-color="W">W</div>
+                                        <div class="mana-symbol mana-u" data-color="U">U</div>
+                                        <div class="mana-symbol mana-b" data-color="B">B</div>
+                                        <div class="mana-symbol mana-r" data-color="R">R</div>
+                                        <div class="mana-symbol mana-g" data-color="G">G</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div><label class="block text-sm font-medium text-gray-300 mb-1">Gewonnen</label><input type="number" id="gamesWon" class="input-dark text-center" value="0" min="0" required /></div>
+                                <div><label class="block text-sm font-medium text-gray-300 mb-1">Verloren</label><input type="number" id="gamesLost" class="input-dark text-center" value="0" min="0" required /></div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-300 mb-1">Format</label>
+                                    <select id="format" class="select-dark">
+                                        <option value="Commander">Commander</option>
+                                        <option value="Modern">Modern</option>
+                                        <option value="Standard">Standard</option>
+                                        <option value="Pauper">Pauper</option>
+                                        <option value="Other">Andere</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button type="submit" id="log-match-btn" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-4 rounded w-full transition-colors shadow-lg" disabled>Spiel protokollieren</button>
+                        </form>
+                    </div>
+
+                    <h2 class="text-3xl font-bold text-white mb-4">Protokollierte Spiele</h2>
+                    <div class="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <div><label class="block text-sm font-medium text-gray-400 mb-1">Eigenes Deck Filter:</label><select id="filterOwnDeck" class="select-dark"></select></div>
+                            <div><label class="block text-sm font-medium text-gray-400 mb-1">Gegner Deck Filter:</label><select id="filterOpponentDeck" class="select-dark"></select></div>
+                            <div><label class="block text-sm font-medium text-gray-400 mb-1">Ergebnis Filter:</label><select id="filterResult" class="select-dark"><option value="all">Alle Ergebnisse</option><option value="Win">Gewonnen</option><option value="Loss">Verloren</option></select></div>
+                        </div>
+                        <div id="match-list" class="space-y-3"><p class="text-center text-gray-500" id="loading-text">Lade Spieldaten...</p></div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('home-btn').onclick = () => window.location.href = 'homescreen.html';
+            document.getElementById('logout-btn').onclick = () => signOut(auth).then(() => window.location.href = 'index.html');
+            document.getElementById('name-display').onclick = async () => {
+                const newName = prompt(`Enter new display name (Current: ${user.displayName || user.email.split('@')[0]}):`);
+                if (newName && newName.trim()) {
+                    try { await updateProfile(user, { displayName: newName.trim() }); renderApp(user); } catch(e) { alert("Failed to update name: " + e.message); }
+                }
+            };
+
+            document.getElementById('matchForm').onsubmit = logMatch;
+            document.querySelectorAll('#own-colors-container .mana-symbol').forEach(el => el.onclick = () => toggleColor(el, 'own'));
+            document.querySelectorAll('#opponent-colors-container .mana-symbol').forEach(el => el.onclick = () => toggleColor(el, 'opponent'));
+            ['ownDeckName', 'opponentDeckName', 'gamesWon', 'gamesLost'].forEach(id => document.getElementById(id).oninput = checkForm);
+
+            loadFilters();
+            listenForMatches();
+            lucide.createIcons();
+        }
+        
+        onAuthStateChanged(auth, (user) => {
+            if (user) { renderApp(user); } else { window.location.href = 'index.html'; }
+        });
+
+    </script>
+</body>
+</html>

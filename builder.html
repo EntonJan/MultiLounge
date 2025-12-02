@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Commander Deck Builder (Cloud)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src='https://unpkg.com/tesseract.js@v2.1.0/dist/tesseract.min.js'></script>
+    
+    <script>
+        tailwind.config = {
+            theme: { extend: { fontFamily: { sans: ['Inter', 'sans-serif'] } } }
+        }
+    </script>
+    <style>
+        /* Custom Scrollbar */
+        .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; border-radius: 10px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        
+        /* Animations & Loaders */
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+        .toast-fade { animation: fadeOut 2s forwards; animation-delay: 1s; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #eab308; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Drag & Drop Visuals */
+        .dragging-ghost { position: fixed; z-index: 1000; opacity: 0.85; box-shadow: 0 10px 25px rgba(0,0,0,0.5); pointer-events: none; }
+        
+        body { background-color: #111827; color: #e5e5e5; font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-900 scrollbar-thin">
+
+    <div id="app-root">
+        <div class="min-h-screen flex flex-col items-center justify-center">
+            <div class="loader mb-4"></div>
+            <p class="text-gray-400">Connecting to Cloud...</p>
+        </div>
+    </div>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyB2qmkKq4sYOXDd7mF-Mq1rnCWCfDAWXew",
+            authDomain: "entons-game-tracker.firebaseapp.com",
+            projectId: "entons-game-tracker",
+            storageBucket: "entons-game-tracker.firebasestorage.app",
+            messagingSenderId: "968932411080",
+            appId: "1:968932411080:web:d391ffe5ecbd7852bc47fd",
+            measurementId: "G-KB6JSFEPS1"
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        
+        // Expose Firebase functions to window for the React app
+        window.db = db;
+        window.fb = { collection, doc, setDoc, getDocs, deleteDoc };
+
+        /* --- GLOBAL HEADER START (DO NOT CHANGE) --- */
+        const renderHeader = (user) => {
+            const displayName = user.displayName || user.email.split('@')[0];
+            const hexId = user.uid.substring(0, 9).toUpperCase();
+            
+            return `
+                <header class="bg-gray-800 shadow-md p-4 sticky top-0 z-50 border-b border-gray-700">
+                    <div class="max-w-7xl mx-auto flex justify-between items-center">
+                        <div class="flex items-center space-x-4">
+                            <h1 class="text-2xl font-bold text-blue-400 tracking-tight">Deck Builder <span class="text-xs text-green-400 font-normal ml-1">Cloud V18.3</span></h1>
+                            <button id="home-btn" class="bg-gray-700 hover:bg-gray-600 text-white p-2 rounded-full transition-colors shadow-sm" title="Home Menu">
+                                <i data-lucide="home" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                        <div class="text-right text-sm">
+                            <div class="flex items-center justify-end space-x-2">
+                                <span class="font-semibold text-white cursor-pointer hover:text-blue-300 transition-colors" id="name-display" title="Click to Change Name">${displayName}</span> 
+                                <span class="text-gray-500">| ${hexId}</span>
+                            </div>
+                            <div class="flex items-center justify-end space-x-2 mt-1">
+                                <span class="text-xs text-gray-500">${user.email}</span>
+                                <button id="logout-btn" class="text-red-400 hover:text-red-300 text-xs transition-colors flex items-center">
+                                    <i data-lucide="log-out" class="w-3 h-3 mr-1"></i> Logout
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+            `;
+        };
+        /* --- GLOBAL HEADER END --- */
+
+        const renderAuthCheck = () => {
+             onAuthStateChanged(auth, (user) => {
+                const rootElement = document.getElementById('app-root');
+                if (user) {
+                    // 1. Render Header
+                    rootElement.innerHTML = renderHeader(user) + '<div id="react-content" class="pt-4"></div>';
+                    
+                    // 2. Attach Header Listeners
+                    document.getElementById('home-btn').onclick = () => window.location.href = 'homescreen.html';
+                    document.getElementById('logout-btn').onclick = () => signOut(auth).then(() => window.location.href = 'index.html');
+                    document.getElementById('name-display').onclick = async () => {
+                        const newName = prompt(`Enter new display name (Current: ${user.displayName || user.email.split('@')[0]}):`);
+                        if (newName && newName.trim()) {
+                            try {
+                                await updateProfile(user, { displayName: newName.trim() });
+                                renderAuthCheck(); 
+                            } catch(e) { alert("Failed to update name: " + e.message); }
+                        }
+                    };
+                    lucide.createIcons();
+
+                    // 3. Mount React App
+                    if (typeof App !== 'undefined') {
+                        const root = ReactDOM.createRoot(document.getElementById('react-content'));
+                        root.render(React.createElement(App, { user: user })); 
+                    } else {
+                        setTimeout(() => {
+                            if (typeof App !== 'undefined') {
+                                const root = ReactDOM.createRoot(document.getElementById('react-content'));
+                                root.render(React.createElement(App, { user: user }));
+                            } else {
+                                console.error("React App component failed to load.");
+                            }
+                        }, 100);
+                    }
+                } else {
+                    window.location.href = 'index.html';
+                }
+            });
+        };
+
+        window.onload = renderAuthCheck;
+    </script>
+    
+    <script type="text/babel">
+        // --- REACT APP START ---
+        
+        const LOCAL_STORAGE_KEY_LEGACY = 'commander_decks_data_stable_v1'; 
+        const SCRYFALL_API_BASE = 'https://api.scryfall.com';
+        
+        const { useState, useEffect, useMemo, useRef } = React;
+        const generateId = () => Math.random().toString(36).substring(2, 9);
+
+        const fetchWithRetry = async (url, options = {}, attempts = 0) => {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    if (response.status === 429) {
+                        await new Promise(r => setTimeout(r, 500));
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return response.json();
+            } catch (error) {
+                if (attempts >= 3) throw error;
+                await new Promise(r => setTimeout(r, 1000));
+                return fetchWithRetry(url, options, attempts + 1);
+            }
+        };
+
+        const getPrimaryCardType = (card) => {
+            if (!card || !card.type_line) return 'Unknown';
+            const order = ['Creature', 'Planeswalker', 'Instant', 'Sorcery', 'Enchantment', 'Artifact', 'Land'];
+            const typeLine = card.type_line;
+            for (const type of order) {
+                if (new RegExp(`\\b${type}\\b`, 'i').test(typeLine)) return type;
+            }
+            return 'Other';
+        };
+
+        // --- COMPONENT: DECK CARD ---
+        const DeckCard = React.memo(({ card, isCommander, onMove, onDelete, actionLabel, onDragStartUnified }) => {
+            const imageUrl = card.image_url || `https://placehold.co/200x280/0f172a/ffffff?text=${encodeURIComponent(card.name)}`;
+            const price = parseFloat(card.isFoil && card.prices?.eur_foil ? card.prices.eur_foil : card.prices?.eur) || 0;
+            const marketLink = card.purchase_uris?.cardmarket ? `${card.purchase_uris.cardmarket}&sellerCountry=7&referrer=scryfall` : `https://www.cardmarket.com/en/Magic/Products/Singles?searchString=${encodeURIComponent(card.name)}`;
+            
+            const cardRef = useRef(null);
+            const startDrag = (e) => { onDragStartUnified(e, card, isCommander ? 'commander' : (actionLabel === 'To SB' ? 'deck' : 'sideboard'), cardRef); };
+
+            const setCode = card.set ? card.set.toUpperCase() : (card.set_code ? card.set_code.toUpperCase() : '???');
+            const collectorNum = card.collector_number ? `#${card.collector_number}` : '';
+
+            return (
+                <div ref={cardRef} className="p-2 h-full w-full" draggable="true" onDragStart={startDrag} onTouchStart={startDrag}>
+                    <div className="relative group flex flex-col items-center bg-slate-800 rounded-xl shadow-lg border border-slate-700 hover:border-yellow-500 transition-all duration-200 h-full cursor-grab active:cursor-grabbing">
+                        <div className="relative w-full aspect-[5/7] mb-2 overflow-hidden rounded-t-xl">
+                            <img src={imageUrl} alt={card.name} className="w-full h-full object-cover" loading="lazy" />
+                            {card.isFoil && <div className="absolute top-1 left-1 bg-yellow-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded shadow z-10">FOIL</div>}
+                            <button onClick={(e) => { e.stopPropagation(); onDelete(card.id, isCommander); }} className="absolute top-1 right-1 bg-red-600 hover:bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20 shadow-md font-bold leading-none" title="Delete">&times;</button>
+                            {!isCommander && (
+                                <div className="absolute bottom-0 inset-x-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20 bg-gradient-to-t from-black/80 to-transparent">
+                                    <button onClick={(e) => { e.stopPropagation(); onMove(card); }} className="w-full text-[10px] py-1 rounded font-bold uppercase text-white bg-blue-600 hover:bg-blue-500 shadow-sm">{actionLabel}</button>
+                                </div>
+                            )}
+                        </div>
+                        <div className="w-full text-center px-1 mb-1 flex-grow">
+                            <p className="text-xs font-bold truncate" title={card.name}>{card.name}</p>
+                            <div className="flex justify-between px-1 mt-1 text-[10px] text-gray-400"><span>{setCode}</span><span>{collectorNum}</span></div>
+                        </div>
+                        <div className="flex items-center justify-between w-full px-2 mb-2 bg-slate-900/50 rounded-b-xl py-1 relative z-30">
+                            <span className={`text-xs font-bold ${price > 0 ? 'text-yellow-400' : 'text-gray-500'}`}>{price > 0 ? `~€${price.toFixed(2)}` : 'N/A'}</span>
+                            <a href={marketLink} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white px-2 py-0.5 rounded cursor-pointer z-40">Buy</a>
+                        </div>
+                    </div>
+                </div>
+            );
+        });
+
+        const StatBarChart = ({ data, title, maxCount, barColor }) => {
+            const totalCount = data.reduce((sum, item) => sum + item.count, 0);
+            return (
+                <div className="bg-gray-700 p-4 rounded-xl shadow-inner flex-1 min-w-[280px]">
+                    <h4 className="font-bold text-lg text-yellow-400 mb-4">{title} ({totalCount})</h4>
+                    <div className="flex flex-col gap-3">
+                        {data.map(({ label, count }) => {
+                            const percentage = (count / maxCount) * 100;
+                            return (
+                                <div key={label} className="flex flex-col text-sm">
+                                    <div className="flex justify-between items-end mb-1">
+                                        <div className="text-emerald-300 font-semibold truncate" title={label}>{label}</div>
+                                        <span className="text-xs font-bold text-white/80">{count}</span>
+                                    </div>
+                                    <div className="w-full h-4 bg-gray-600 rounded-sm overflow-hidden relative">
+                                        <div style={{ width: `${percentage}%` }} className={`h-full ${barColor} transition-all duration-300 rounded-sm`}></div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        const DeckStats = ({ cards }) => {
+            const typeMap = {};
+            let totalCmc = 0;
+            const cmcMap = {};
+            cards.forEach(c => {
+                const cmc = Math.min(Math.round(c.cmc || 0), 8);
+                cmcMap[cmc] = (cmcMap[cmc] || 0) + 1;
+                totalCmc += c.cmc || 0;
+                const type = getPrimaryCardType(c);
+                typeMap[type] = (typeMap[type] || 0) + 1;
+            });
+            const cmcData = Array.from({ length: 9 }, (_, i) => i).map(i => ({ label: i === 8 ? '8+' : i.toString(), count: cmcMap[i] || 0 }));
+            const maxCmcCount = Math.max(...cmcData.map(d => d.count), 1);
+            const typeOrder = ['Creature', 'Planeswalker', 'Instant', 'Sorcery', 'Enchantment', 'Artifact', 'Land', 'Other', 'Unknown'];
+            const typeData = Object.keys(typeMap).map(t => ({ label: t, count: typeMap[t] })).sort((a, b) => typeOrder.indexOf(a.label) - typeOrder.indexOf(b.label) || b.count - a.count);
+            const maxTypeCount = Math.max(...typeData.map(d => d.count), 1);
+            
+            return (
+                <div className="mt-6">
+                    <h3 className="font-bold text-xl mb-4 text-white">Main Deck Statistics</h3>
+                    <div className="flex flex-wrap gap-4 justify-center">
+                        <StatBarChart title="CMC Distribution" data={cmcData} maxCount={maxCmcCount} barColor="bg-green-500" />
+                        <StatBarChart title="Card Type Distribution" data={typeData} maxCount={maxTypeCount} barColor="bg-blue-500" />
+                    </div>
+                </div>
+            );
+        };
+// --- MODALS (Scanner, Search, Import, Data) ---
+        const CardScannerModal = ({ isOpen, onClose, onScannedName }) => {
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+            const [status, setStatus] = useState('Ready to Scan');
+            const [processing, setProcessing] = useState(false);
+
+            useEffect(() => {
+                let stream;
+                if (isOpen) {
+                    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                        .then((s) => { stream = s; videoRef.current.srcObject = stream; videoRef.current.play(); setStatus('Live Feed Active. Center card title.'); })
+                        .catch((err) => { console.error(err); setStatus('ERROR: Camera access failed.'); });
+                } else if (videoRef.current && videoRef.current.srcObject) {
+                    videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+                    videoRef.current.srcObject = null;
+                }
+                return () => { if (stream) stream.getTracks().forEach(track => track.stop()); };
+            }, [isOpen]);
+
+            const captureAndOCR = async () => {
+                if (processing) return;
+                setProcessing(true);
+                setStatus('Capturing & Processing...');
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                
+                try {
+                    const { data: { text } } = await Tesseract.recognize(canvas.toDataURL('image/jpeg'), 'eng');
+                    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 3);
+                    const potentialName = lines.length > 0 ? lines[0] : '';
+                    setStatus(`Found: "${potentialName}"`);
+                    if (potentialName) setTimeout(() => onScannedName(potentialName), 500);
+                    else { setStatus('No text detected. Try again.'); setProcessing(false); }
+                } catch (error) {
+                    setStatus('OCR Failed.');
+                    setProcessing(false);
+                }
+            };
+
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div className="bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-lg">
+                        <h2 className="text-2xl font-bold text-yellow-400 mb-4 flex justify-between">Scan Card <button onClick={onClose} className="text-red-500">&times;</button></h2>
+                        <div className="relative mb-4 bg-black rounded-lg overflow-hidden aspect-video">
+                            <video ref={videoRef} className="w-full h-full object-cover" playsInline autoPlay muted></video>
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none border-2 border-red-500/50 m-8 rounded"></div>
+                        </div>
+                        <canvas ref={canvasRef} className="hidden"></canvas>
+                        <p className="text-center mb-4 text-sm text-gray-300">{status}</p>
+                        <button onClick={captureAndOCR} disabled={processing} className="w-full py-3 rounded-lg font-bold bg-yellow-600 hover:bg-yellow-500 text-white">{processing ? 'Scanning...' : 'Capture'}</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const CardSearchModal = ({ isOpen, onClose, onAdd, onSetCommander, onAddSideboard, onOpenScanner, preSearchQuery, onSearchExecuted }) => {
+            const [searchTerm, setSearchTerm] = useState('');
+            const [results, setResults] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const [selectedCard, setSelectedCard] = useState(null);
+            const [printings, setPrintings] = useState([]);
+            const [selectedPrinting, setSelectedPrinting] = useState(null);
+            const [selectedFinish, setSelectedFinish] = useState('nonfoil');
+            const [currentPage, setCurrentPage] = useState(1);
+            const ITEMS_PER_PAGE = 12;
+            const searchInputRef = useRef(null);
+
+            useEffect(() => { if (isOpen) { setSearchTerm(''); setResults([]); setSelectedCard(null); setPrintings([]); setSelectedPrinting(null); setCurrentPage(1); setError(null); setTimeout(() => searchInputRef.current?.focus(), 100); } }, [isOpen]);
+            useEffect(() => { if (isOpen && preSearchQuery) { setSearchTerm(preSearchQuery); searchCards(preSearchQuery); onSearchExecuted(); } }, [isOpen, preSearchQuery]);
+
+            const searchCards = async (query) => {
+                if (!query) { setResults([]); return; }
+                setLoading(true); setError(null); setSelectedCard(null); setPrintings([]);
+                try {
+                    const data = await fetchWithRetry(`${SCRYFALL_API_BASE}/cards/search?q=${encodeURIComponent(query)}&unique=cards&order=relevance`);
+                    setResults(data.data || []);
+                } catch (e) { setError('Error searching Scryfall.'); setResults([]); } finally { setLoading(false); }
+            };
+
+            const fetchPrintings = async (card) => {
+                setLoading(true); setPrintings([]); setSelectedPrinting(null);
+                try {
+                    const data = await fetchWithRetry(card.prints_search_uri);
+                    const printData = data.data || [];
+                    printData.sort((a, b) => new Date(b.released_at) - new Date(a.released_at));
+                    setPrintings(printData);
+                    if (printData.length > 0) { setSelectedPrinting(printData[0]); setSelectedFinish(printData[0].finishes?.includes('foil') ? 'foil' : 'nonfoil'); }
+                } catch (e) { setError('Error fetching printings.'); } finally { setLoading(false); }
+            };
+
+            const handleAdd = (addTo) => {
+                if (!selectedPrinting) return;
+                const c = selectedPrinting;
+                const newCard = { ...c, id: generateId(), image_url: c.image_uris?.normal || c.card_faces?.[0]?.image_uris?.normal, isFoil: selectedFinish === 'foil', selectedFinish };
+                if (addTo === 'deck') onAdd(newCard);
+                else if (addTo === 'sideboard') onAddSideboard(newCard);
+                else if (addTo === 'commander') onSetCommander(newCard);
+                onClose();
+            };
+
+            if (!isOpen) return null;
+            const visiblePrintings = printings.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+            const currentImg = selectedPrinting?.image_uris?.normal || selectedPrinting?.card_faces?.[0]?.image_uris?.normal || selectedCard?.image_uris?.normal || 'https://placehold.co/200x280?text=No+Image';
+
+            return (
+                <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div className="bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin">
+                        <div className="flex justify-between mb-4"><h2 className="text-2xl font-bold text-yellow-400">Add Card</h2><button onClick={onClose} className="text-red-500 text-3xl">&times;</button></div>
+                        <div className="flex flex-col gap-2 mb-4">
+                            <div className="flex gap-2">
+                                <button onClick={() => searchCards(searchTerm)} className="flex-grow bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded font-bold">Search</button>
+                                <button onClick={onOpenScanner} className="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded text-xl">📷</button>
+                            </div>
+                            <input ref={searchInputRef} value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchCards(searchTerm)} placeholder="Card name..." className="p-3 rounded bg-gray-900 border border-gray-700 w-full" />
+                        </div>
+                        {loading && <div className="flex justify-center"><div className="loader"></div></div>}
+                        <div className="flex flex-col md:flex-row gap-4">
+                            {!selectedCard ? (
+                                <div className="w-full max-h-96 overflow-y-auto border border-gray-700 rounded p-2">
+                                    {results.map(r => <div key={r.id} onClick={() => { setSelectedCard(r); fetchPrintings(r); }} className="p-2 hover:bg-gray-700 cursor-pointer flex justify-between"><span>{r.name}</span><span className="text-gray-400 text-xs">{r.set_name}</span></div>)}
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="w-full md:w-2/3">
+                                        <div className="flex justify-between mb-2">
+                                            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} className="bg-gray-700 px-2 rounded">&larr;</button><span>Page {currentPage}</span><button onClick={() => setCurrentPage(p => p + 1)} className="bg-gray-700 px-2 rounded">&rarr;</button>
+                                        </div>
+                                        <div className="grid grid-cols-4 gap-2">
+                                            {visiblePrintings.map(p => (
+                                                <div key={p.id} onClick={() => setSelectedPrinting(p)} className={`relative aspect-[5/7] cursor-pointer border-2 ${selectedPrinting?.id === p.id ? 'border-yellow-500' : 'border-transparent'}`}>
+                                                    <img src={p.image_uris?.small || p.card_faces?.[0]?.image_uris?.small} className="w-full h-full object-cover" />
+                                                    <div className="absolute bottom-0 bg-black/70 w-full text-center text-[8px]">{p.set.toUpperCase()}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="w-full md:w-1/3 flex flex-col items-center">
+                                        <img src={currentImg} className="w-48 rounded mb-2" />
+                                        {selectedPrinting && (
+                                            <div className="flex flex-col gap-2 w-full">
+                                                <div className="flex justify-center gap-2 mb-2">{selectedPrinting.finishes?.map(f => <button key={f} onClick={() => setSelectedFinish(f)} className={`text-xs px-2 py-1 rounded ${selectedFinish === f ? 'bg-yellow-500 text-black' : 'bg-gray-700'}`}>{f}</button>)}</div>
+                                                <button onClick={() => handleAdd('deck')} className="bg-green-600 py-2 rounded font-bold">Add to Deck</button>
+                                                <button onClick={() => handleAdd('commander')} className="bg-purple-600 py-2 rounded font-bold">Set Commander</button>
+                                                <button onClick={() => handleAdd('sideboard')} className="bg-blue-600 py-2 rounded font-bold">Add Sideboard</button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ImportModal = ({ isOpen, onClose, onImportBatch }) => {
+            const [text, setText] = useState('');
+            const [processing, setProcessing] = useState(false);
+            const [progress, setProgress] = useState('');
+            
+            if (!isOpen) return null;
+            
+            return (
+                <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50">
+                    <div className="bg-gray-800 rounded-xl p-6 w-full max-w-2xl">
+                        <h2 className="text-2xl font-bold text-cyan-400 mb-4">Batch Import</h2>
+                        <p className="text-xs text-gray-400 mb-2">Supported: "1 Sol Ring (C19) *F*", "1 Sol Ring *FOIL*"</p>
+                        <textarea value={text} onChange={e => setText(e.target.value)} className="w-full h-48 bg-gray-900 p-2 rounded text-white border border-gray-700 mb-4" placeholder="Paste list here..."></textarea>
+                        {progress && <p className="text-sm text-yellow-400 mb-2">{progress}</p>}
+                        <div className="flex justify-end gap-2">
+                            <button onClick={onClose} disabled={processing} className="bg-gray-700 px-4 py-2 rounded disabled:opacity-50">Cancel</button>
+                            <button onClick={async () => { setProcessing(true); setProgress(''); await onImportBatch(text, setProgress); setProcessing(false); setText(''); setProgress(''); }} disabled={processing} className="bg-cyan-600 px-4 py-2 rounded disabled:opacity-50">
+                                {processing ? <div className="flex items-center gap-2"><div className="loader w-4 h-4"></div> Importing...</div> : 'Import'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+// --- MAIN APP COMPONENT ---
+        const App = ({ user }) => {
+            const [decks, setDecks] = useState([]);
+            const [currId, setCurrId] = useState(null);
+            const [currDeck, setCurrDeck] = useState({ id: 'init', name: 'New Deck', commander: null, cards: [], sideboard: [] });
+            const [sideboard, setSideboard] = useState([]);
+            const [deckSort, setDeckSort] = useState({ key: 'name', dir: 'asc' });
+            const [sbSort, setSbSort] = useState({ key: 'name', dir: 'asc' });
+            const [modals, setModals] = useState({ search: false, import: false, scan: false });
+            const [toast, setToast] = useState(null);
+            const [newName, setNewName] = useState('');
+            const [preSearchQuery, setPreSearchQuery] = useState('');
+            const [loadingDecks, setLoadingDecks] = useState(true);
+            
+            // Access globals securely inside the component
+            const db = window.db;
+            const { collection, doc, setDoc, getDocs, deleteDoc } = window.fb;
+
+            // Drag and Drop
+            const [isDragging, setIsDragging] = useState(false);
+            const [draggingCardData, setDraggingCardData] = useState(null);
+            const commanderRef = useRef(null);
+            const deckRef = useRef(null);
+            const sideboardRef = useRef(null);
+
+            const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2000); };
+
+            // --- DATA LOAD & MIGRATION ---
+            useEffect(() => {
+                const loadDecks = async () => {
+                    setLoadingDecks(true);
+                    try {
+                        const decksRef = collection(db, 'users', user.uid, 'decks');
+                        const snapshot = await getDocs(decksRef);
+                        let remoteDecks = snapshot.docs.map(d => d.data());
+
+                        // --- MIGRATION LOGIC ---
+                        const localData = localStorage.getItem(LOCAL_STORAGE_KEY_LEGACY);
+                        if (localData && remoteDecks.length === 0) {
+                            showToast("Migrating local decks to cloud...");
+                            try {
+                                const localDecks = JSON.parse(localData);
+                                if (Array.isArray(localDecks) && localDecks.length > 0) {
+                                    for (const d of localDecks) {
+                                        await setDoc(doc(decksRef, d.id), d);
+                                    }
+                                    remoteDecks = localDecks;
+                                    showToast("Migration Success!");
+                                }
+                            } catch (e) { console.error("Migration failed", e); }
+                        }
+                        // -----------------------
+
+                        if (remoteDecks.length === 0) {
+                            const init = { id: generateId(), name: 'Starter', commander: null, cards: [], sideboard: [] };
+                            await setDoc(doc(decksRef, init.id), init);
+                            remoteDecks = [init];
+                        }
+                        
+                        setDecks(remoteDecks);
+                        if (remoteDecks.length > 0) {
+                            const first = remoteDecks[0];
+                            setCurrId(first.id);
+                            setCurrDeck({ ...first, cards: first.cards || [], sideboard: first.sideboard || [] });
+                            setSideboard(first.sideboard || []);
+                        }
+                    } catch (e) {
+                        showToast("Error loading decks from Cloud");
+                        console.error(e);
+                    } finally {
+                        setLoadingDecks(false);
+                    }
+                };
+                loadDecks();
+            }, [user.uid]);
+
+            const save = async (d, s) => {
+                const fd = { ...d, sideboard: s };
+                
+                // Update Local State Immediately
+                const nd = decks.map(x => x.id === fd.id ? fd : x);
+                if (!decks.find(x => x.id === fd.id)) nd.push(fd);
+                setDecks(nd);
+                
+                // Save to Cloud Background
+                try {
+                    await setDoc(doc(db, 'users', user.uid, 'decks', fd.id), fd);
+                } catch(e) { showToast("Save Failed"); console.error(e); }
+            };
+
+            const updateState = (d, s) => { setCurrDeck(d); setSideboard(s); save(d, s); };
+            
+            const loadDeck = (id) => {
+                const d = decks.find(x => x.id === id);
+                if(d) { setCurrId(id); setCurrDeck({...d, cards: d.cards||[], sideboard: d.sideboard||[]}); setSideboard(d.sideboard||[]); }
+            };
+
+            const moveCard = (id, src, tgt) => {
+                if (src === tgt) return;
+                let c = null, nd = { ...currDeck }, nsb = [...sideboard];
+                if (src === 'commander') { c = nd.commander; if (c?.id === id) nd.commander = null; else return; }
+                else if (src === 'deck') { c = nd.cards.find(x => x.id === id); nd.cards = nd.cards.filter(x => x.id !== id); }
+                else if (src === 'sideboard') { c = nsb.find(x => x.id === id); nsb = nsb.filter(x => x.id !== id); }
+                if (!c) return;
+
+                if (tgt === 'commander') { if (nd.commander) nd.cards = [nd.commander, ...nd.cards]; nd.commander = c; }
+                else if (tgt === 'deck') { nd.cards = [c, ...nd.cards]; }
+                else if (tgt === 'sideboard') { nsb = [c, ...nsb]; }
+                updateState(nd, nsb);
+                showToast(`Moved to ${tgt}`);
+            };
+
+            const handleDragStartUnified = (e, card, zone, ref) => {
+                if (e.type === 'dragstart') { e.dataTransfer.setData('id', card.id); e.dataTransfer.setData('zone', zone); }
+                else {
+                    e.preventDefault();
+                    const t = e.touches[0];
+                    setDraggingCardData({ id: card.id, zone });
+                    const g = ref.current.cloneNode(true);
+                    g.id = 'ghost'; g.classList.add('dragging-ghost');
+                    g.style.left = `${t.clientX}px`; g.style.top = `${t.clientY}px`;
+                    document.body.appendChild(g);
+                    setIsDragging(true);
+                }
+            };
+
+            const handleTouchMove = (e) => {
+                if (!isDragging) return;
+                const t = e.touches[0];
+                const g = document.getElementById('ghost');
+                if (g) { g.style.left = `${t.clientX}px`; g.style.top = `${t.clientY}px`; }
+            };
+
+            const handleTouchEnd = (e) => {
+                if (!isDragging) return;
+                const g = document.getElementById('ghost'); if(g) g.remove();
+                const t = e.changedTouches[0];
+                const zones = [ { id: 'commander', r: commanderRef.current?.getBoundingClientRect() }, { id: 'deck', r: deckRef.current?.getBoundingClientRect() }, { id: 'sideboard', r: sideboardRef.current?.getBoundingClientRect() } ];
+                const hit = zones.find(z => z.r && t.clientX > z.r.left && t.clientX < z.r.right && t.clientY > z.r.top && t.clientY < z.r.bottom);
+                if (hit) moveCard(draggingCardData.id, draggingCardData.zone, hit.id);
+                setIsDragging(false); setDraggingCardData(null);
+            };
+            
+            const handleDropDesktop = (e, tgt) => {
+                e.preventDefault();
+                moveCard(e.dataTransfer.getData('id'), e.dataTransfer.getData('zone'), tgt);
+            };
+
+            const createDeck = async () => {
+                const n = newName.trim() || `Deck ${decks.length + 1}`;
+                const d = { id: generateId(), name: n, commander: null, cards: [], sideboard: [] };
+                // Optimistic UI
+                setDecks([...decks, d]); 
+                loadDeck(d.id); 
+                setNewName('');
+                // Save
+                await setDoc(doc(db, 'users', user.uid, 'decks', d.id), d);
+            };
+
+            const deleteDeck = async () => {
+                if (decks.length <= 1) return showToast("Can't delete last deck");
+                if (confirm(`Delete ${currDeck.name}?`)) {
+                    const toDeleteId = currDeck.id;
+                    const nd = decks.filter(x => x.id !== toDeleteId);
+                    // UI Update
+                    setDecks(nd); 
+                    loadDeck(nd[0].id);
+                    // Cloud Delete
+                    await deleteDoc(doc(db, 'users', user.uid, 'decks', toDeleteId));
+                    showToast("Deck Deleted");
+                }
+            };
+
+            // *** FIXED PARSELINE FUNCTION ***
+            const parseLine = (line) => {
+                if (!line || !line.trim()) return null;
+                let text = line.trim();
+                let isFoil = false;
+                
+                // 1. Detect and remove Foil tag
+                if (/\*f\*|\*foil\*/i.test(text)) {
+                    isFoil = true;
+                    text = text.replace(/\*f\*|\*foil\*/gi, '').trim();
+                }
+                
+                // 2. Extract Count (start of line)
+                let count = 1;
+                const countMatch = text.match(/^(\d+)[x\s]+/i);
+                if (countMatch) {
+                    count = parseInt(countMatch[1]);
+                    text = text.substring(countMatch[0].length).trim();
+                }
+                
+                // 3. Extract Set and Collector Number (End of line)
+                // This regex looks for patterns like: "Name (SET) 123" or "Name (SET)"
+                // It is much more robust than the previous one because it anchors to the end ($)
+                // and accepts whatever is left at the start as the Name.
+                
+                let set = null;
+                let num = null;
+                
+                const metaMatch = text.match(/\s+\(([a-zA-Z0-9]{3,5})\)(?:\s+([a-zA-Z0-9]+))?$/);
+                
+                if (metaMatch) {
+                    set = metaMatch[1].toLowerCase();
+                    num = metaMatch[2] || null;
+                    // Everything before the match is the name
+                    text = text.substring(0, metaMatch.index).trim();
+                }
+                
+                // If text is not empty, return the parsed object
+                if (text) {
+                    return { count, name: text, set, num, foil: isFoil };
+                }
+                
+                return null;
+            };
+
+            // *** FIX: IMPROVED importBatch with better error handling and progress feedback ***
+            const importBatch = async (rawText, setProgress) => {
+                const lines = rawText.split('\n').filter(l => l.trim() && !l.startsWith('//'));
+                if (!lines.length) {
+                    showToast("No cards found");
+                    return;
+                }
+                
+                const reqs = lines.map(parseLine).filter(Boolean);
+                if (reqs.length === 0) {
+                    showToast("No valid card lines found");
+                    return;
+                }
+                
+                setProgress(`Parsing ${reqs.length} card entries...`);
+                
+                const ids = [];
+                reqs.forEach(r => { 
+                    if (r.set && r.num) ids.push({ set: r.set, collector_number: r.num }); 
+                    else if (r.set) ids.push({ name: r.name, set: r.set }); 
+                    else ids.push({ name: r.name }); 
+                });
+
+                let found = [];
+                try {
+                    const CHUNK_SIZE = 75;
+                    const totalChunks = Math.ceil(ids.length / CHUNK_SIZE);
+                    
+                    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+                        const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
+                        setProgress(`Fetching cards from Scryfall (chunk ${chunkNum}/${totalChunks})...`);
+                        
+                        const chunk = ids.slice(i, i + CHUNK_SIZE);
+                        
+                        try {
+                            const res = await fetchWithRetry(`${SCRYFALL_API_BASE}/cards/collection`, { 
+                                method: 'POST', 
+                                headers: {'Content-Type': 'application/json'}, 
+                                body: JSON.stringify({ identifiers: chunk }) 
+                            });
+                            
+                            if (res.data) {
+                                found = [...found, ...res.data];
+                            }
+                            
+                            // Respect Scryfall rate limits
+                            if (i + CHUNK_SIZE < ids.length) {
+                                await new Promise(r => setTimeout(r, 100));
+                            }
+                        } catch (chunkError) {
+                            console.error(`Error fetching chunk ${chunkNum}:`, chunkError);
+                            setProgress(`Warning: Some cards in chunk ${chunkNum} could not be fetched`);
+                            await new Promise(r => setTimeout(r, 500));
+                        }
+                    }
+                } catch (e) { 
+                    console.error("Import error:", e);
+                    showToast("Scryfall Error - Partial import may occur"); 
+                    setProgress("Error occurred, processing found cards...");
+                }
+
+                setProgress(`Processing ${found.length} found cards...`);
+
+                const map = new Map();
+                found.forEach(c => { 
+                    if (c.set && c.collector_number) map.set(`${c.set}:${c.collector_number}`, c); 
+                    map.set(c.name.toLowerCase(), c); 
+                });
+                
+                const newCards = [];
+                let notFoundCount = 0;
+                
+                reqs.forEach(r => {
+                    let c = (r.set && r.num) ? map.get(`${r.set}:${r.num}`) : null;
+                    if (!c) c = map.get(r.name.toLowerCase());
+                    
+                    if (c) { 
+                        for (let i = 0; i < r.count; i++) { 
+                            newCards.push({ 
+                                ...c, 
+                                id: generateId(), 
+                                image_url: c.image_uris?.normal || c.card_faces?.[0]?.image_uris?.normal, 
+                                isFoil: r.foil, 
+                                selectedFinish: r.foil ? 'foil' : 'nonfoil' 
+                            }); 
+                        } 
+                    } else {
+                        notFoundCount++;
+                        console.warn(`Card not found: ${r.name}${r.set ? ` (${r.set})` : ''}`);
+                    }
+                });
+                
+                updateState({ ...currDeck, cards: [...currDeck.cards, ...newCards] }, sideboard);
+                
+                const successMsg = `Imported ${newCards.length} cards`;
+                const warningMsg = notFoundCount > 0 ? ` (${notFoundCount} not found)` : '';
+                showToast(successMsg + warningMsg);
+                setProgress('');
+            };
+
+            const exportDeck = () => {
+                const fmt = (c) => `1 ${c.name} (${(c.set||'').toUpperCase()}) ${c.collector_number||''} ${c.isFoil ? '*F*' : ''}`;
+                const txt = [ currDeck.commander ? `${fmt(currDeck.commander)} # Commander\n` : '', ...currDeck.cards.map(fmt), sideboard.length ? '\n// Sideboard\n' : '', ...sideboard.map(fmt) ].join('\n');
+                navigator.clipboard.writeText(txt).then(() => showToast("Copied!")).catch(() => showToast("Copy failed"));
+            };
+
+            const sortFn = (lst, s) => [...lst].sort((a,b) => {
+                let va = s.key === 'price' ? (parseFloat(a.prices?.eur)||0) : (s.key === 'cmc' ? (a.cmc||0) : a.name);
+                let vb = s.key === 'price' ? (parseFloat(b.prices?.eur)||0) : (s.key === 'cmc' ? (b.cmc||0) : b.name);
+                return (va < vb ? -1 : 1) * (s.dir === 'asc' ? 1 : -1);
+            });
+
+            const mainGrouped = useMemo(() => {
+                const s = sortFn(currDeck.cards, deckSort);
+                const g = s.reduce((a, c) => { const t = getPrimaryCardType(c); (a[t] = a[t] || []).push(c); return a; }, {});
+                return Object.entries(g).sort((a,b) => a[0].localeCompare(b[0])); 
+            }, [currDeck.cards, deckSort]);
+
+            const sbSorted = useMemo(() => sortFn(sideboard, sbSort), [sideboard, sbSort]);
+            
+            const stats = useMemo(() => {
+                const all = [currDeck.commander, ...currDeck.cards, ...sideboard].filter(Boolean);
+                const pr = all.reduce((a,c) => a + (parseFloat(c.isFoil?c.prices?.eur_foil:c.prices?.eur)||0), 0);
+                let totalCmc = 0; currDeck.cards.forEach(c => totalCmc += (c.cmc || 0));
+                const avgCmc = currDeck.cards.length > 0 ? (totalCmc / currDeck.cards.length).toFixed(2) : 0;
+                return { count: all.length, main: currDeck.cards.length, price: pr, avgCmc };
+            }, [currDeck, sideboard]);
+
+            if (loadingDecks) {
+                return <div className="min-h-screen flex items-center justify-center text-yellow-400">Loading Decks from Cloud...</div>;
+            }
+return (
+                <div className="max-w-7xl mx-auto p-4" onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+                    {isDragging && <div id="ghost-overlay" className="fixed inset-0 z-50 pointer-events-none"></div>}
+                    {toast && <div className="fixed top-4 right-4 bg-green-600 px-4 py-2 rounded shadow-xl z-50 toast-fade">{toast}</div>}
+
+                    <ImportModal isOpen={modals.import} onClose={() => setModals({...modals, import: false})} onImportBatch={importBatch} />
+                    <CardSearchModal isOpen={modals.search} onClose={() => setModals({...modals, search: false})} onAdd={c => updateState({...currDeck, cards: [c, ...currDeck.cards]}, sideboard)} onSetCommander={c => {
+                        const old = currDeck.commander;
+                        updateState({...currDeck, commander: c, cards: old ? [old, ...currDeck.cards] : currDeck.cards}, sideboard);
+                    }} onAddSideboard={c => updateState(currDeck, [c, ...sideboard])} onOpenScanner={() => setModals({...modals, search: false, scan: true})} preSearchQuery={preSearchQuery} onSearchExecuted={() => setPreSearchQuery('')} />
+                    <CardScannerModal isOpen={modals.scan} onClose={() => setModals({...modals, scan: false})} onScannedName={n => { setPreSearchQuery(n); setModals({...modals, scan: false, search: true}); }} />
+
+                    <div className="flex justify-between items-center mb-6 gap-4 flex-wrap">
+                        <div className="flex gap-2">
+                            <select value={currId||''} onChange={e => loadDeck(e.target.value)} className="bg-gray-800 p-2 rounded text-white border border-gray-700"><option value="" disabled>Select Deck</option>{decks.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
+                            <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createDeck()} placeholder="New Name" className="bg-gray-800 w-24 px-2 rounded text-white border border-gray-700" />
+                            <button onClick={createDeck} className="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded font-bold">+</button>
+                        </div>
+                    </div>
+
+                    <div className="bg-gray-800 p-4 rounded-xl mb-6 flex justify-between items-center flex-wrap gap-4 border border-gray-700 shadow-md">
+                        <div>
+                            <input 
+                                value={currDeck.name} 
+                                onChange={(e) => updateState({ ...currDeck, name: e.target.value }, sideboard)}
+                                className="bg-transparent font-bold text-xl mr-2 border-b border-gray-600 focus:border-yellow-400 outline-none w-48 sm:w-64 text-white"
+                            />
+                            <span className="text-gray-400 block sm:inline mt-1 sm:mt-0">{stats.count} Cards • €{stats.price.toFixed(2)}</span>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={() => setModals({...modals, search: true})} className="bg-yellow-600 hover:bg-yellow-500 px-4 py-2 rounded font-bold text-white shadow-sm">+ Add</button>
+                            <button onClick={() => setModals({...modals, import: true})} className="bg-cyan-600 hover:bg-cyan-500 px-3 py-2 rounded text-white">Import</button>
+                            <button onClick={exportDeck} className="bg-orange-600 hover:bg-orange-500 px-3 py-2 rounded text-white">Export</button>
+                            <button onClick={deleteDeck} className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded text-white">Delete</button>
+                        </div>
+                    </div>
+
+                    <div className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700 mb-6">
+                        <div ref={commanderRef} onDragOver={e => e.preventDefault()} onDrop={e => handleDropDesktop(e, 'commander')} className="flex justify-center mb-6 border-b border-gray-700 pb-6 min-h-[100px]">
+                            {currDeck.commander ? <div className="w-48"><DeckCard card={currDeck.commander} isCommander={true} onDelete={() => updateState({...currDeck, commander: null}, sideboard)} onDragStartUnified={handleDragStartUnified} /></div> : <div className="text-gray-500 border-2 border-dashed border-gray-600 rounded-xl w-48 h-64 flex items-center justify-center">Commander Zone</div>}
+                        </div>
+
+                        <div className="flex justify-between mb-2 items-center">
+                            <h3 className="font-bold text-blue-400">Main Deck ({stats.main}) <span className="ml-2 text-sm font-normal text-gray-400">(Avg. CMC: {stats.avgCmc})</span></h3>
+                            <div className="flex gap-2">
+                                <select value={deckSort.key} onChange={e => setDeckSort(s => ({...s, key: e.target.value}))} className="bg-gray-700 text-xs rounded p-1 text-white"><option value="name">Name</option><option value="cmc">CMC</option><option value="price">Price</option></select>
+                                <button onClick={() => setDeckSort(s => ({...s, dir: s.dir === 'asc' ? 'desc' : 'asc'}))} className="bg-gray-700 px-2 rounded text-sm">{deckSort.dir === 'asc' ? '⬆' : '⬇'}</button>
+                            </div>
+                        </div>
+
+                        <div ref={deckRef} onDragOver={e => e.preventDefault()} onDrop={e => handleDropDesktop(e, 'deck')} className="min-h-[200px]">
+                            {mainGrouped.map(([type, cards]) => (
+                                <div key={type} className="mb-4">
+                                    <h4 className="font-bold text-emerald-400 mb-2 border-b border-gray-600 pb-1">{type} ({cards.length})</h4>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                                        {cards.map(c => <DeckCard key={c.id} card={c} onMove={() => moveCard(c.id, 'deck', 'sideboard')} onDelete={() => moveCard(c.id, 'deck', 'void')} actionLabel="SB" onDragStartUnified={handleDragStartUnified} />)}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="bg-gray-800 rounded-xl p-4 shadow-lg border border-gray-700 mb-6">
+                        <div className="flex justify-between mb-2 items-center">
+                            <h3 className="font-bold text-gray-300">Sideboard ({sideboard.length})</h3>
+                            <div className="flex gap-2">
+                                <select value={sbSort.key} onChange={e => setSbSort(s => ({...s, key: e.target.value}))} className="bg-gray-700 text-xs rounded p-1 text-white"><option value="name">Name</option><option value="cmc">CMC</option><option value="price">Price</option></select>
+                                <button onClick={() => setSbSort(s => ({...s, dir: s.dir === 'asc' ? 'desc' : 'asc'}))} className="bg-gray-700 px-2 rounded text-sm">{sbSort.dir === 'asc' ? '⬆' : '⬇'}</button>
+                            </div>
+                        </div>
+                        <div ref={sideboardRef} onDragOver={e => e.preventDefault()} onDrop={e => handleDropDesktop(e, 'sideboard')} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 min-h-[100px]">
+                            {sbSorted.map(c => <DeckCard key={c.id} card={c} onMove={() => moveCard(c.id, 'sideboard', 'deck')} onDelete={() => moveCard(c.id, 'sideboard', 'void')} actionLabel="Deck" onDragStartUnified={handleDragStartUnified} />)}
+                        </div>
+                    </div>
+
+                    <DeckStats cards={currDeck.cards} />
+                </div>
+            );
+        };
+        
+        // Expose App to window so the non-module script can see it (if needed for debugging, though createRoot handles it)
+        window.App = App;
+    </script>
+</body>
+</html>
